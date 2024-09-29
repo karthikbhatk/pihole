@@ -123,7 +123,7 @@ Release: 1
 License: EUPL
 BuildArch: noarch
 Summary: Pi-hole dependency meta package
-Requires: grep,curl,psmisc,sudo, unzip,jq,git,dialog,ca-certificates, bind-utils, iproute, newt, procps-ng, chkconfig, binutils, cronie, findutils, libcap, nmap-ncat, lshw, bash-completion
+Requires: grep,curl,psmisc,sudo, unzip,jq,git,dialog,ca-certificates, bind-utils, iproute, procps-ng, chkconfig, binutils, cronie, findutils, libcap, nmap-ncat, lshw, bash-completion
 %description
 Pi-hole dependency meta package
 %prep
