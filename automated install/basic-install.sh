@@ -102,7 +102,7 @@ r=20
 c=70
 
 # Content of Pi-hole's meta package control file
-PIHOLE_META_PACKAGE_CONTROL_DEBIAN=$(
+PIHOLE_META_PACKAGE_CONTROL_APT=$(
     cat <<EOM
 Package: pihole-meta
 Version: 0.1
@@ -110,6 +110,28 @@ Maintainer: Pi-hole team <adblock@pi-hole.net>
 Architecture: all
 Description: Pi-hole dependency meta package
 Depends: grep,dnsutils,binutils,git,iproute2,dialog,ca-certificates,cron,curl,iputils-ping,psmisc,sudo,unzip,libcap2-bin,dns-root-data,libcap2,netcat-openbsd,procps,jq,lshw,bash-completion
+EOM
+)
+
+PIHOLE_META_PACKAGE_CONTROL_RPM=$(
+    cat <<EOM
+%define _topdir /tmp/rpmbuild
+Name: pihole-meta
+Version: 0.1
+Release: 1
+License: EUPL
+BuildArch: noarch
+Summary: Pi-hole dependency meta package
+Requires: grep,curl,psmisc,sudo, unzip,jq,git,dialog,ca-certificates, bind-utils, iproute, newt, procps-ng, chkconfig, binutils, cronie, findutils, libcap, nmap-ncat, lshw, bash-completion
+%description
+Pi-hole dependency meta package
+%prep
+%build
+%files
+%install
+%changelog
+* Sun Sep 29 2024 Pi-hole Team - 0.1
+- First version being packaged
 EOM
 )
 
@@ -401,9 +423,6 @@ package_manager_detect() {
         PKG_INSTALL="${PKG_MANAGER} install -y"
         # CentOS package manager returns 100 when there are packages to update so we need to || true to prevent the script from exiting.
         PKG_COUNT="${PKG_MANAGER} check-update | grep -E '(.i686|.x86|.noarch|.arm|.src|.riscv64)' | wc -l || true"
-        OS_CHECK_DEPS=(bind-utils)
-        INSTALLER_DEPS=(iproute newt procps-ng chkconfig binutils)
-        PIHOLE_DEPS=(cronie findutils libcap nmap-ncat lshw bash-completion)
 
     # If neither apt-get or yum/dnf package managers were found
     else
@@ -425,8 +444,24 @@ build_dependency_package(){
         mkdir -p /tmp/pihole-meta/DEBIAN
         chmod 0755 /tmp/pihole-meta/DEBIAN
         touch /tmp/pihole-meta/DEBIAN/control
-        echo "${PIHOLE_META_PACKAGE_CONTROL_DEBIAN}" > /tmp/pihole-meta/DEBIAN/control
+        echo "${PIHOLE_META_PACKAGE_CONTROL_APT}" > /tmp/pihole-meta/DEBIAN/control
         dpkg-deb --build --root-owner-group pihole-meta
+        # Move back into the directory the user started in
+        popd &> /dev/null || return 1
+    fi
+
+    if is_command rpm; then
+        local PKG_REMOVE
+        PKG_REMOVE="${PKG_MANAGER} remove -y"
+        pushd /tmp &>/dev/null || return 1
+        eval "${PKG_INSTALL}" "rpm-build"
+        mkdir -p /tmp/rpmbuild/SPECS
+        touch /tmp/rpmbuild/SPECS/pihole-meta.spec
+        echo "${PIHOLE_META_PACKAGE_CONTROL_RPM}" > /tmp/rpmbuild/SPECS/pihole-meta.spec
+
+        rpmbuild -bb /tmp/rpmbuild/SPECS/pihole-meta.spec
+        eval "${PKG_REMOVE}" "rpm-build"
+        mv /tmp/rpmbuild/RPMS/noarch/pihole-meta*.rpm /tmp/pihole-meta.rpm
         # Move back into the directory the user started in
         popd &> /dev/null || return 1
     fi
@@ -1415,14 +1450,25 @@ install_dependent_packages() {
         if [ -f /tmp/pihole-meta.deb ]; then
             eval "${PKG_INSTALL}" "/tmp/pihole-meta.deb"
             rm /tmp/pihole-meta.deb
+            rm -r /tmp/pihole-meta
         else
-            printf "  %b Error: Unable to find dependency meta package.\\n" "${COL_LIGHT_RED}"
+            printf "  %b Error: Unable to find Pi-hole dependency meta package.\\n" "${COL_LIGHT_RED}"
             return 1
         fi
     fi
 
     # Install Fedora/CentOS packages
+    if is_command rpm; then
+            if [ -f /tmp/pihole-meta.rpm ]; then
+            eval "${PKG_INSTALL}" "/tmp/pihole-meta.rpm"
+            rm /tmp/pihole-meta.rpm
+            rm -r /tmp/rpmbuild
+        else
+            printf "  %b Error: Unable to find Pi-hole dependency meta package.\\n" "${COL_LIGHT_RED}"
+            return 1
+        fi
 
+    fi
     printf "\\n"
     return 0
 }
@@ -2247,7 +2293,7 @@ main() {
     # Notify user of package availability
     notify_package_updates_available
 
-    # Build dependecy package
+    # Build dependency package
     build_dependency_package
 
     # Install Pi-hole dependencies
