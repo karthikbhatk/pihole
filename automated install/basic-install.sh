@@ -101,7 +101,7 @@ fi
 r=20
 c=70
 
-# Content of Pi-hole's meta package control file
+# Content of Pi-hole's meta package control file on APT based systems
 PIHOLE_META_PACKAGE_CONTROL_APT=$(
     cat <<EOM
 Package: pihole-meta
@@ -113,9 +113,10 @@ Depends: grep,dnsutils,binutils,git,iproute2,dialog,ca-certificates,cron,curl,ip
 EOM
 )
 
+# Content of Pi-hole's meta package control file on RPM based systems
 PIHOLE_META_PACKAGE_CONTROL_RPM=$(
     cat <<EOM
-%define _topdir /tmp/rpmbuild
+%define _topdir /tmp/pihole-meta
 Name: pihole-meta
 Version: 0.1
 Release: 1
@@ -439,32 +440,59 @@ build_dependency_package(){
     chmod 0755 /tmp/pihole-meta
 
     if is_command apt-get; then
-        # move into the directory
+
+        # move into the tmp directory
         pushd /tmp &>/dev/null || return 1
+
+        # Prepare directory structure and control file
         mkdir -p /tmp/pihole-meta/DEBIAN
         chmod 0755 /tmp/pihole-meta/DEBIAN
         touch /tmp/pihole-meta/DEBIAN/control
+
+        # Write the control file
         echo "${PIHOLE_META_PACKAGE_CONTROL_APT}" > /tmp/pihole-meta/DEBIAN/control
+
+        # Build the package
         dpkg-deb --build --root-owner-group pihole-meta
+
         # Move back into the directory the user started in
         popd &> /dev/null || return 1
     fi
 
     if is_command rpm; then
-        local PKG_REMOVE
-        PKG_REMOVE="${PKG_MANAGER} remove -y"
+        # move into the tmp directory
         pushd /tmp &>/dev/null || return 1
-        eval "${PKG_INSTALL}" "rpm-build"
-        mkdir -p /tmp/rpmbuild/SPECS
-        touch /tmp/rpmbuild/SPECS/pihole-meta.spec
-        echo "${PIHOLE_META_PACKAGE_CONTROL_RPM}" > /tmp/rpmbuild/SPECS/pihole-meta.spec
 
-        rpmbuild -bb /tmp/rpmbuild/SPECS/pihole-meta.spec
-        eval "${PKG_REMOVE}" "rpm-build"
-        mv /tmp/rpmbuild/RPMS/noarch/pihole-meta*.rpm /tmp/pihole-meta.rpm
+        # Prepare directory structure and spec file
+        mkdir -p /tmp/pihole-meta/SPECS
+        touch /tmp/pihole-meta/SPECS/pihole-meta.spec
+        echo "${PIHOLE_META_PACKAGE_CONTROL_RPM}" > /tmp/pihole-meta/SPECS/pihole-meta.spec
+
+        # check if we need to install the build dependencies
+        if ! is_command rpmbuild; then
+            local REMOVE_RPM_BUILD=true
+            eval "${PKG_INSTALL}" "rpm-build"
+        fi
+
+        # Build the package
+        rpmbuild -bb /tmp/pihole-meta/SPECS/pihole-meta.spec
+
+        # Move the package to the /tmp directory
+        mv /tmp/pihole-meta/RPMS/noarch/pihole-meta*.rpm /tmp/pihole-meta.rpm
+
+        # Remove the build dependencies when we've installed them
+        if [ -n "${REMOVE_RPM_BUILD}" ]; then
+            local PKG_REMOVE
+            PKG_REMOVE="${PKG_MANAGER} remove -y"
+            eval "${PKG_REMOVE}" "rpm-build"
+        fi
+
         # Move back into the directory the user started in
         popd &> /dev/null || return 1
     fi
+
+    # Remove the build directory
+    rm -rf /tmp/pihole-meta
 }
 
 # A function for checking if a directory is a git repository
@@ -1446,11 +1474,11 @@ notify_package_updates_available() {
 install_dependent_packages() {
     # Install meta dependency package
 
+    # Install Debian/Ubuntu packages
     if is_command apt-get; then
         if [ -f /tmp/pihole-meta.deb ]; then
             eval "${PKG_INSTALL}" "/tmp/pihole-meta.deb"
             rm /tmp/pihole-meta.deb
-            rm -r /tmp/pihole-meta
         else
             printf "  %b Error: Unable to find Pi-hole dependency meta package.\\n" "${COL_LIGHT_RED}"
             return 1
@@ -1462,7 +1490,6 @@ install_dependent_packages() {
             if [ -f /tmp/pihole-meta.rpm ]; then
             eval "${PKG_INSTALL}" "/tmp/pihole-meta.rpm"
             rm /tmp/pihole-meta.rpm
-            rm -r /tmp/rpmbuild
         else
             printf "  %b Error: Unable to find Pi-hole dependency meta package.\\n" "${COL_LIGHT_RED}"
             return 1
